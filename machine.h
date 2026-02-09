@@ -11,6 +11,7 @@ typedef struct {
 
 void initializeMachine(Machine* machine, int qtdTasks);
 void destroyMachine(Machine* machine);
+void copyMachine(Machine* dest, const Machine* src);
 
 void pushTask(Machine* machine, int task);
 int popTask(Machine* machine);

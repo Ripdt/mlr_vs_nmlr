@@ -1,6 +1,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include "machine.h"
 
@@ -12,12 +14,31 @@
 
 #define N_EXECUTIONS 10
 
+Machine* createSolution(int nMachines, int nTasks) {
+	Machine* machines = (Machine*)malloc(sizeof(Machine) * nMachines);
+	for (int i = 0; i < nMachines; i++)
+		initializeMachine(&machines[i], nTasks);
+
+	return machines;
+}
+
+Machine* copySolution(Machine* src, int nMachines) {
+	Machine* cpyMachines = (Machine*)malloc(sizeof(Machine) * nMachines);
+	for (int i = 0; i < nMachines; i++)
+		copyMachine(&cpyMachines[i], &src[i]);
+	return cpyMachines;
+}
+
+void destroySolution(Machine* machines, int nMachines) {
+	for (int i = 0; i < nMachines; i++)
+		destroyMachine(&machines[i]);
+	free(machines);
+}
+
 void monotoneLocalReasoning(int nMachines, int nTasks, FILE* file) {
 	int execution = 0;
-	while (++execution != N_EXECUTIONS) {
-		Machine* machines = (Machine*)malloc(sizeof(Machine) * nMachines);
-		for (int i = 0; i < nMachines; i++)
-			initializeMachine(&machines[i], nTasks);
+	while (execution++ != N_EXECUTIONS) {
+		Machine* machines = createSolution(nMachines, nTasks);
 
 		int criticIndex = 0;
 		Machine* criticMachine = &machines[criticIndex];
@@ -64,7 +85,7 @@ void monotoneLocalReasoning(int nMachines, int nTasks, FILE* file) {
 		const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
 
 		// heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
-		fprintf(file, "monotona,%d,%d,%d,%.2f,%d,%d,NA\n",
+		fprintf(file, "monotona,%d,%d,%d,%.5f,%d,%d,NA\n",
 				nTasks,
 				nMachines,
 				execution,
@@ -72,44 +93,115 @@ void monotoneLocalReasoning(int nMachines, int nTasks, FILE* file) {
 				it,
 				makespan
 			);
-		for (int i = 0; i < nMachines; i++) destroyMachine(&machines[i]);
-		free(machines);
+
+		destroySolution(machines, nMachines);
 	}
 }
 
-void simulatedAnnealing(int nMachines, int nTasks, int alfa, FILE* file) {
-	int execution = 0;
-	while (++execution != N_EXECUTIONS) {
-		Machine* machines = (Machine*)malloc(sizeof(Machine) * nMachines);
-		for (int i = 0; i < nMachines; i++)
-			initializeMachine(&machines[i], nTasks);
+Machine* findCriticMachine(Machine* machines, int nMachines) {
+	Machine* higher = &machines[0];
+	for (int i = 1; i < nMachines; i++) {
+		if (machines[i].makespan > higher->makespan) higher = &machines[i];
+	}
+	return higher;
+}
 
-		int criticIndex = 0;
-		Machine* criticMachine = &machines[criticIndex];
+float calculateDisturbanceLevel(Machine* machines, int nMachines, Machine* criticMachine) {
+	int sum = 0;
+	for (int i = 0; i < nMachines; i++) {
+		sum += machines[i].makespan;
+	}
+	float mu = (float)sum / nMachines;
+
+	return (criticMachine->makespan - mu) / mu;
+}
+
+void applyDisturbance(Machine* machines, int nMachines, float disturbanceLevel) {
+	Machine* critic = findCriticMachine(machines, nMachines);
+	
+	if (critic->qtdTasks == 0) return;
+	
+	int tasksToMove = (int)(disturbanceLevel * critic->qtdTasks);
+	if (tasksToMove < 1) tasksToMove = 1;
+	if (tasksToMove > critic->qtdTasks) tasksToMove = critic->qtdTasks;
+	
+	for (int i = 0; i < tasksToMove; i++) {
+		if (critic->qtdTasks == 0) break;
+		int task = popTask(critic);
+		int targetIdx;
+		do {
+			targetIdx = rand() % nMachines;
+		} while (&machines[targetIdx] == critic && nMachines > 1);
+
+		pushTask(&machines[targetIdx], task);
+	}
+}
+
+void simulatedAnnealing(int nMachines, int nTasks, float alfa, FILE* file) {
+	int execution = 0;
+	while (execution++ != N_EXECUTIONS) {
+		Machine* machines = createSolution(nMachines, nTasks);
 
 		for (int taskIndex = 0; taskIndex < nTasks; taskIndex++)
-			pushTask(criticMachine, rand() % TASK_FACTOR + 1);
+			pushTask(&machines[0], rand() % TASK_FACTOR + 1);
 
+		float temperature = 10000.0f;
+
+		Machine* criticMachine = &machines[0];
 		int makespan = criticMachine->makespan;
 		int it = 0;
+
 		const clock_t start = clock();
 
-		
+		while (temperature > 0.1f) {
+			Machine* oldSolution = machines;
+			Machine* newSolution = copySolution(machines, nMachines);
+
+			float disturbanceLevel = calculateDisturbanceLevel(newSolution, nMachines, findCriticMachine(newSolution, nMachines));
+			applyDisturbance(newSolution, nMachines, disturbanceLevel);
+
+			const int actualMakespan = makespan;
+
+			Machine* newCriticMachine = findCriticMachine(newSolution, nMachines);
+			const int newMakespan = newCriticMachine->makespan;
+
+			if (newMakespan <= actualMakespan) {
+				machines = newSolution;
+				criticMachine = newCriticMachine;
+				destroySolution(oldSolution, nMachines);
+			}
+			else {
+				const float acceptanceProbability = expf((float)(newMakespan - actualMakespan) / temperature);
+				const float randomValue = (float)rand() / RAND_MAX;
+				if (randomValue < acceptanceProbability) {
+					machines = newSolution;
+					criticMachine = newCriticMachine;
+					destroySolution(oldSolution, nMachines);
+				}
+				else {
+					destroySolution(newSolution, nMachines);
+				}
+			}
+
+			makespan = criticMachine->makespan;
+			temperature *= alfa;
+			++it;
+		}
 
 		const clock_t stop = clock();
 		const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
 
 		// heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
-		fprintf(file, "monotona,%d,%d,%d,%.2f,%d,%d,NA\n",
+		fprintf(file, "temperasimulada,%d,%d,%d,%.5f,%d,%d,%.2f\n",
 				nTasks,
 				nMachines,
 				execution,
 				duration,
 				it,
-				makespan
+				makespan,
+				alfa
 			);
-		for (int i = 0; i < nMachines; i++) destroyMachine(&machines[i]);
-		free(machines);
+		destroySolution(machines, nMachines);
 	}
 }
 
