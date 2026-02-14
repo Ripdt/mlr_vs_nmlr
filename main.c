@@ -1,9 +1,10 @@
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
-#include <time.h>
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
+#include <sys/stat.h>
+#include <time.h>
 
 #include "machine.h"
 
@@ -57,7 +58,6 @@ void monotoneLocalReasoning(int nMachines, int nTasks, int nRep, FILE* file) {
 		int it = 0;
 		const clock_t start = clock();
 		do {
-
 			int targetIndex = criticIndex + 1;
 			if (criticIndex == nMachines - 1) targetIndex = 0;
 
@@ -75,16 +75,102 @@ void monotoneLocalReasoning(int nMachines, int nTasks, int nRep, FILE* file) {
 				popTask(criticMachine);
 				pushTask(targetMachine, task);
 
-				++it;
+				if (targetMachine->makespan > criticMachine->makespan) {
+					criticMachine = targetMachine;
+					criticIndex = targetIndex;
+				}
+				else if (targetMachine->makespan == criticMachine->makespan) {
+					makespan = criticMachine->makespan;
+					criticMachine = NULL;
+				}
+			}
+
+			if (criticMachine) {
+				makespan = criticMachine->makespan;
+			}
+
+			++it;
+		} while (criticMachine);
+
+		const clock_t stop = clock();
+		const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
+
+		// heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
+		fprintf(file, "monotona,%d,%d,%d,%.5f,%d,%d,NA\n",
+				nTasks,
+				nMachines,
+				execution,
+				duration,
+				it,
+				makespan
+			);
+
+		destroySolution(machines, nMachines);
+	}
+}
+
+void monotoneLocalReasoning_debug(int nMachines, int nTasks, FILE* file) {
+	int execution = 0;
+	while (execution++ != N_EXECUTIONS) {
+		Machine* machines = createSolution(nMachines, nTasks);
+
+		int criticIndex = 0;
+		Machine* criticMachine = &machines[criticIndex];
+
+		for (int taskIndex = 0; taskIndex < nTasks; taskIndex++)
+			pushTask(criticMachine, rand() % TASK_FACTOR + 1);
+
+		int makespan = criticMachine->makespan;
+		int it = 0;
+		char buffer[256];
+
+		sprintf(buffer, "results/monotona_%dm_%dt_%dx.txt", nMachines, nTasks, execution);
+
+		FILE* csv;
+		csv = fopen(buffer, "w+");
+		if (csv) {
+			fprintf(csv, "iteration,makespan\n");
+		}
+		else {
+			printf("\nFAILED TO OPEN FILE %s\n", buffer);
+			return;
+		}
+
+		const clock_t start = clock();
+		do {
+			int targetIndex = criticIndex + 1;
+			if (criticIndex == nMachines - 1) targetIndex = 0;
+
+			Machine* targetMachine = &machines[targetIndex];
+
+			int task = peekTask(criticMachine);
+			const int actualMakespan = criticMachine->makespan;
+			const int targetMakespan = targetMachine->makespan + task;
+
+			if (targetMakespan > actualMakespan) {
+				makespan = actualMakespan;
+				criticMachine = NULL;
+			}
+			else {
+				popTask(criticMachine);
+				pushTask(targetMachine, task);
 
 				if (targetMachine->makespan > criticMachine->makespan) {
 					criticMachine = targetMachine;
 					criticIndex = targetIndex;
 				}
 				else if (targetMachine->makespan == criticMachine->makespan) {
+					makespan = criticMachine->makespan;
 					criticMachine = NULL;
 				}
 			}
+
+			if (criticMachine) {
+				makespan = criticMachine->makespan;
+			}
+
+			++it;
+			fprintf(csv, "%d,%d\n", it, makespan);
 
 		} while (criticMachine);
 
@@ -101,6 +187,7 @@ void monotoneLocalReasoning(int nMachines, int nTasks, int nRep, FILE* file) {
 				makespan
 			);
 
+		fclose(csv);
 		destroySolution(machines, nMachines);
 	}
 }
@@ -194,25 +281,110 @@ static void run_one_sa_replication(int nMachines, int nTasks, float alfa, int re
 		int accepted = 0;
 		int piora_aceita = 0;
 
-		if (newMakespan <= actualMakespan) {
-			machines = newSolution;
-			criticMachine = newCriticMachine;
-			destroySolution(oldSolution, nMachines);
-			accepted = 1;
-		} else {
-			const float acceptanceProbability = expf((float)(newMakespan - actualMakespan) / temperature);
-			const float randomValue = (float)rand() / RAND_MAX;
-			if (randomValue < acceptanceProbability) {
+			if (newMakespan <= actualMakespan) {
 				machines = newSolution;
 				criticMachine = newCriticMachine;
 				destroySolution(oldSolution, nMachines);
-				accepted = 1;
-				piora_aceita = 1; /* Coleta: piora aceita */
-				pioras_aceitas++;
-			} else {
-				destroySolution(newSolution, nMachines);
 			}
+			else {
+				const float delta = (float)(newMakespan - actualMakespan);
+				const float acceptanceProbability = expf(-delta / temperature);
+				const float randomValue = (float)rand() / RAND_MAX;
+				if (randomValue < acceptanceProbability) {
+					machines = newSolution;
+					criticMachine = newCriticMachine;
+					destroySolution(oldSolution, nMachines);
+				}
+				else {
+					destroySolution(newSolution, nMachines);
+				}
+			}
+
+			makespan = criticMachine->makespan;
+			temperature *= alfa;
+			++it;
 		}
+
+		const clock_t stop = clock();
+		const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
+
+		// heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
+		fprintf(file, "temperasimulada,%d,%d,%d,%.5f,%d,%d,%.2f\n",
+				nTasks,
+				nMachines,
+				execution,
+				duration,
+				it,
+				makespan,
+				alfa
+			);
+
+		destroySolution(machines, nMachines);
+	}
+}
+
+void simulatedAnnealing_debug(int nMachines, int nTasks, float alfa, FILE* file) {
+	int execution = 0;
+	while (execution++ != N_EXECUTIONS) {
+		Machine* machines = createSolution(nMachines, nTasks);
+
+		for (int taskIndex = 0; taskIndex < nTasks; taskIndex++)
+			pushTask(&machines[0], rand() % TASK_FACTOR + 1);
+
+		float temperature = 10000.0f;
+
+		Machine* criticMachine = &machines[0];
+		int makespan = criticMachine->makespan;
+		int it = 0;
+
+		char buffer[256];
+		const int iAlfa = alfa*100;
+		sprintf(buffer, "results/tempera_%dm_%dt_%da_%dx.txt", nMachines, nTasks, iAlfa, execution);
+
+		FILE* csv;
+		csv = fopen(buffer, "w+");
+		if (csv) {
+			fprintf(csv, "temperatura,makespan\n");
+		}
+		else {
+			printf("\nFAILED TO OPEN FILE %s\n", buffer);
+			return;
+		}
+
+		const clock_t start = clock();
+
+		while (temperature > 0.1f) {
+			fprintf(csv, "%.5f,%d\n", temperature, makespan);
+
+			Machine* oldSolution = machines;
+			Machine* newSolution = copySolution(machines, nMachines);
+
+			float disturbanceLevel = calculateDisturbanceLevel(newSolution, nMachines, findCriticMachine(newSolution, nMachines));
+			applyDisturbance(newSolution, nMachines, disturbanceLevel);
+
+			const int actualMakespan = makespan;
+
+			Machine* newCriticMachine = findCriticMachine(newSolution, nMachines);
+			const int newMakespan = newCriticMachine->makespan;
+
+			if (newMakespan <= actualMakespan) {
+				machines = newSolution;
+				criticMachine = newCriticMachine;
+				destroySolution(oldSolution, nMachines);
+			}
+			else {
+				const float delta = (float)(newMakespan - actualMakespan);
+				const float acceptanceProbability = expf(-delta / temperature);
+				const float randomValue = (float)rand() / RAND_MAX;
+				if (randomValue < acceptanceProbability) {
+					machines = newSolution;
+					criticMachine = newCriticMachine;
+					destroySolution(oldSolution, nMachines);
+				}
+				else {
+					destroySolution(newSolution, nMachines);
+				}
+			}
 
 		makespan = criticMachine->makespan;
 		if (makespan < best_makespan) best_makespan = makespan;
@@ -227,196 +399,87 @@ static void run_one_sa_replication(int nMachines, int nTasks, float alfa, int re
 	const clock_t stop = clock();
 	const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
 
-	if (convFile) fclose(convFile);
+		// heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
+		fprintf(file, "temperasimulada,%d,%d,%d,%.5f,%d,%d,%.2f\n",
+				nTasks,
+				nMachines,
+				execution,
+				duration,
+				it,
+				makespan,
+				alfa
+			);
 
-	/* Saída principal: heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro */
-	fprintf(mainFile, "temperasimulada,%d,%d,%d,%.5f,%d,%d,%.2f\n",
-		nTasks, nMachines, repNum, duration, it, makespan, alfa);
-
-	/* Coleta análise 3: taxa de aceitação de pioras em sa_acceptance.csv */
-	if (resultsDir) {
-		char path[256];
-		snprintf(path, sizeof(path), "%s/sa_acceptance.csv", resultsDir);
-		FILE* accFile = fopen(path, "a");
-		if (accFile) {
-			double taxa = (pioras_propostas > 0) ? (100.0 * pioras_aceitas / pioras_propostas) : 0.0;
-			fprintf(accFile, "temperasimulada,%d,%d,%.2f,%d,%d,%d,%d,%.2f\n",
-				nTasks, nMachines, alfa, repNum, total_movimentos, pioras_propostas, pioras_aceitas, taxa);
-			fclose(accFile);
-		}
-	}
-
-	destroySolution(machines, nMachines);
-}
-
-void simulatedAnnealing(int nMachines, int nTasks, float alfa, int nRep, FILE* file, const char* resultsDir) {
-	int execution = 0;
-	while (execution++ != nRep) {
-		run_one_sa_replication(nMachines, nTasks, alfa, execution, file, resultsDir);
+		fclose(csv);
+		destroySolution(machines, nMachines);
 	}
 }
 
-static int run_all(FILE* file) {
+int main() {
+	srand(time(NULL));
+
+#ifdef DEBUG
+	printf("DEBUG MODE ACTIVATED\n");
+#endif
+
 	const int nMachinesInputs[N_MACHINES_INPUTS] = {10, 20, 50};
 	const float rInputs[N_R_INPUTS] = {1.5, 2.};
 	const float alfaInputs[N_ALFA_INPUTS] = {.8, .85, .9, .95, .99};
 
-	for (int nMachineIndex = 0; nMachineIndex < N_MACHINES_INPUTS; nMachineIndex++) {
-		const int nMachines = nMachinesInputs[nMachineIndex];
-		for (int rIndex = 0; rIndex < N_R_INPUTS; rIndex++) {
-			const int nTasks = (int)pow(nMachines, rInputs[rIndex]);
-			monotoneLocalReasoning(nMachines, nTasks, N_EXECUTIONS, file);
-		}
-	}
-
-	for (int nMachineIndex = 0; nMachineIndex < N_MACHINES_INPUTS; nMachineIndex++) {
-		const int nMachines = nMachinesInputs[nMachineIndex];
-		for (int rIndex = 0; rIndex < N_R_INPUTS; rIndex++) {
-			const int nTasks = (int)pow(nMachines, rInputs[rIndex]);
-			for (int alfaIndex = 0; alfaIndex < N_ALFA_INPUTS; alfaIndex++)
-				simulatedAnnealing(nMachines, nTasks, alfaInputs[alfaIndex], N_EXECUTIONS, file, RESULTS_DIR);
-		}
-	}
-	return 0;
-}
-
-static void usage(const char* prog) {
-	fprintf(stderr,
-		"Uso:\n"
-		"  %s                    Executa todas as combinações padrão (result.txt).\n"
-		"  %s <m> <n> [rep]      Executa MLR e SA para m máquinas, n tarefas.\n"
-		"                         rep = replicações (default: 10). SA usa todos os alfas.\n"
-		"  %s <m> <n> <alfa> [rep]  Executa só SA para m, n e alfa.\n",
-		prog, prog, prog);
-}
-
-/* Garante que results/ existe e que sa_acceptance.csv tem cabeçalho (para análise 3). */
-static void ensure_results_dir_and_acceptance_header(void) {
-#ifndef _WIN32
-	mkdir(RESULTS_DIR, 0755);
-#else
-	_mkdir(RESULTS_DIR);
-#endif
-	{
-		char path[256];
-		snprintf(path, sizeof(path), "%s/sa_acceptance.csv", RESULTS_DIR);
-		FILE* f = fopen(path, "r");
-		if (!f) {
-			f = fopen(path, "w");
-			if (f) {
-				fprintf(f, "heuristica,n,m,alfa,rep,total_movimentos,pioras_propostas,pioras_aceitas,taxa_aceitacao\n");
-				fclose(f);
-			}
-		} else {
-			fclose(f);
-		}
-	}
-}
-
-int main(int argc, char** argv) {
-	/* Reproducibilidade: se MLR_SEED estiver definido, usa valor fixo; senão time(NULL) */
-	const char* seedEnv = getenv("MLR_SEED");
-	if (seedEnv && *seedEnv)
-		srand((unsigned)atoi(seedEnv));
-	else
-		srand((unsigned)time(NULL));
-
-	int nReplications = N_EXECUTIONS;
-	int onlyM = -1, onlyN = -1;
-	float onlyAlfa = -1.f;
-	int append = 0;
-
-	if (argc >= 4) {
-		onlyM = atoi(argv[1]);
-		onlyN = atoi(argv[2]);
-		if (onlyM <= 0 || onlyN <= 0) {
-			fprintf(stderr, "m e n devem ser inteiros positivos.\n");
-			usage(argv[0]);
-			return 1;
-		}
-		/* formato: ./prog m n rep  ou  ./prog m n alfa [rep] */
-		if (strchr(argv[3], '.') != NULL) {
-			onlyAlfa = (float)atof(argv[3]);
-			if (argc >= 5) nReplications = atoi(argv[4]);
-		} else {
-			nReplications = atoi(argv[3]);
-		}
-	}
-
-	const char* outPath = "result.txt";
-	FILE* file;
-
-	if (onlyM > 0 && onlyN > 0) {
-		append = 1;
-		file = fopen(outPath, "a");
-	} else {
-		file = fopen(outPath, "w");
-	}
-
-	if (!file) {
-		fprintf(stderr, "Failed to open file %s\n", outPath);
+	const char* path = "results";
+	struct stat buffer;
+	if (stat(path, &buffer) < 0 && errno != ENOENT) {
+		printf("FAILED TO CHECK IF DIRECTORY results EXISTS\n");
 		return 1;
 	}
 
-	if (!append)
-		fprintf(file, "heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro\n");
-
-	/* Garantir pasta results/ e cabeçalho de sa_acceptance antes de rodar SA */
-	ensure_results_dir_and_acceptance_header();
-
-	if (onlyM > 0 && onlyN > 0) {
-		if (onlyAlfa >= 0.f) {
-			int execution = 0;
-			while (execution++ != nReplications) {
-				run_one_sa_replication(onlyM, onlyN, onlyAlfa, execution, file, RESULTS_DIR);
-			}
-		} else {
-			int execution = 0;
-			while (execution++ != nReplications) {
-				Machine* machines = createSolution(onlyM, onlyN);
-				int criticIndex = 0;
-				Machine* criticMachine = &machines[criticIndex];
-				for (int taskIndex = 0; taskIndex < onlyN; taskIndex++)
-					pushTask(criticMachine, rand() % TASK_FACTOR + 1);
-				int makespan = criticMachine->makespan;
-				int it = 0;
-				const clock_t start = clock();
-				do {
-					int targetIndex = criticIndex + 1;
-					if (criticIndex == onlyM - 1) targetIndex = 0;
-					Machine* targetMachine = &machines[targetIndex];
-					int task = peekTask(criticMachine);
-					const int actualMakespan = criticMachine->makespan;
-					const int targetMakespan = targetMachine->makespan + task;
-					if (targetMakespan > actualMakespan) {
-						makespan = actualMakespan;
-						criticMachine = NULL;
-					} else {
-						popTask(criticMachine);
-						pushTask(targetMachine, task);
-						++it;
-						if (targetMachine->makespan > criticMachine->makespan) {
-							criticMachine = targetMachine;
-							criticIndex = targetIndex;
-						} else if (targetMachine->makespan == criticMachine->makespan) {
-							criticMachine = NULL;
-						}
-					}
-				} while (criticMachine);
-				const clock_t stop = clock();
-				const double duration = (double)(stop - start) / CLOCKS_PER_SEC;
-				fprintf(file, "monotona,%d,%d,%d,%.5f,%d,%d,NA\n",
-					onlyN, onlyM, execution, duration, it, makespan);
-				destroySolution(machines, onlyM);
-			}
-			const float alfaInputs[N_ALFA_INPUTS] = {.8f, .85f, .9f, .95f, .99f};
-			for (int alfaIndex = 0; alfaIndex < N_ALFA_INPUTS; alfaIndex++)
-				simulatedAnnealing(onlyM, onlyN, alfaInputs[alfaIndex], nReplications, file, RESULTS_DIR);
+	if (!S_ISDIR(buffer.st_mode)) {
+		if ( mkdir("results", 0755) != 0) {
+			printf("FAILED TO CREATE DIRECTORY results\n");
+			return 1;
 		}
-	} else {
-		run_all(file);
+	}
+
+	FILE* file;
+#ifdef DEBUG
+	file = fopen("results/result_db.txt", "w+");
+#else
+	file = fopen("results/result.txt", "w+");
+#endif
+	if (file) {
+		fprintf(file, "heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro\n");
+	}
+	else {
+		fprintf(stderr, "Failed to open file ./result.txt\n");
+		return 1;
+	}
+
+	for (int nMachineIndex = 0; nMachineIndex < N_MACHINES_INPUTS; nMachineIndex++) {
+		const int nMachines = nMachinesInputs[nMachineIndex];
+		for (int rIndex = 0; rIndex < N_R_INPUTS; rIndex++) {
+			const int nTasks = pow(nMachines, rInputs[rIndex]);
+#ifdef DEBUG
+			monotoneLocalReasoning_debug(nMachines, nTasks, file);
+#else
+			monotoneLocalReasoning(nMachines, nTasks, file);
+#endif
+		}
+	}
+
+	for (int nMachineIndex = 0; nMachineIndex < N_MACHINES_INPUTS; nMachineIndex++) {
+		const int nMachines = nMachinesInputs[nMachineIndex];
+		for (int rIndex = 0; rIndex < N_R_INPUTS; rIndex++) {
+			const int nTasks = (int)pow(nMachines, rInputs[rIndex]);
+			for (int alfaIndex = 0; alfaIndex < N_ALFA_INPUTS; alfaIndex++)
+#ifdef DEBUG
+				simulatedAnnealing_debug(nMachines, nTasks, alfaInputs[alfaIndex], file);
+#else
+				simulatedAnnealing(nMachines, nTasks, alfaInputs[alfaIndex], file);
+#endif
+		}
 	}
 
 	fclose(file);
+
 	return 0;
 }
