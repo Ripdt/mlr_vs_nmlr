@@ -11,6 +11,8 @@ In this project, we are comparing two types of algorithms to solve the task sche
 
 ## How to run
 
+### To compare Monotone vs Non-Monotone
+
 After cloning this repository, run the shell command bellow to compile:
 
 ```shell
@@ -20,6 +22,19 @@ gcc main.c machine.c stack.c -o mlr_vs_nmlr -lm
 Then run the executable:
 ```shell
 ./mlr_vs_nmlr
+```
+
+### To get data by iteration (slower)
+
+After cloning this repository, run the shell command bellow to compile:
+
+```shell
+gcc main.c machine.c stack.c -DDEBUG -o mlr_vs_nmlr_db -lm
+```
+
+Then run the executable:
+```shell
+./mlr_vs_nmlr_db
 ```
 
 ## Scope
@@ -85,14 +100,21 @@ Where:
 
 The disturbance is applied by calculating the number of tasks to move as $\lfloor q(S) \times \text{qtdTasks}_{\text{critic}} \rfloor$ (minimum 1 task, maximum all tasks). These tasks are popped from the critic machine and pushed to randomly selected machines (excluding the critic machine itself).
 
-
-
 ## Output
 
-The results will be written in a `.txt` file formatted as a CSV with the following header:
+The results will be written in the `results/result.txt` file formatted as a CSV with the following header:
 
 ```
 heuristica,n,m,replicacao,tempo,iteracoes,valor,parametro
 ```
+
+If the program ran in debug mode, the `results` directory will have a file to each iteration of each configuration. Its general results will be printed in the `results/result_db.txt` formatted as a CSV with the header above (the `time` column must not be considered in this because the program spends time writing the extra data).
+The data is going to be in files with this name format:
+
+```
+tempera_10m_31t_85a_2x.txt
+```
+
+Which, in this example, means that this file has the data of the second iteration (`2x`) using the config of 10 machines (`10m`), 31 tasks (`31t`) and 0.85 as its alfa (`85a`; the monotone approach does not have alfa constant, so its data files does not have this in its name).
 
 > 09 fev 2026
