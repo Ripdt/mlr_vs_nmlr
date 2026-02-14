@@ -52,7 +52,6 @@ void monotoneLocalReasoning(int nMachines, int nTasks, FILE* file) {
 		int it = 0;
 		const clock_t start = clock();
 		do {
-
 			int targetIndex = criticIndex + 1;
 			if (criticIndex == nMachines - 1) targetIndex = 0;
 
@@ -70,17 +69,21 @@ void monotoneLocalReasoning(int nMachines, int nTasks, FILE* file) {
 				popTask(criticMachine);
 				pushTask(targetMachine, task);
 
-				++it;
-
 				if (targetMachine->makespan > criticMachine->makespan) {
 					criticMachine = targetMachine;
 					criticIndex = targetIndex;
 				}
 				else if (targetMachine->makespan == criticMachine->makespan) {
+					makespan = criticMachine->makespan;
 					criticMachine = NULL;
 				}
 			}
 
+			if (criticMachine) {
+				makespan = criticMachine->makespan;
+			}
+
+			++it;
 		} while (criticMachine);
 
 		const clock_t stop = clock();
@@ -129,8 +132,6 @@ void monotoneLocalReasoning_debug(int nMachines, int nTasks, FILE* file) {
 
 		const clock_t start = clock();
 		do {
-			fprintf(csv, "%d,%d\n", it, makespan);
-
 			int targetIndex = criticIndex + 1;
 			if (criticIndex == nMachines - 1) targetIndex = 0;
 
@@ -148,16 +149,22 @@ void monotoneLocalReasoning_debug(int nMachines, int nTasks, FILE* file) {
 				popTask(criticMachine);
 				pushTask(targetMachine, task);
 
-				++it;
-
 				if (targetMachine->makespan > criticMachine->makespan) {
 					criticMachine = targetMachine;
 					criticIndex = targetIndex;
 				}
 				else if (targetMachine->makespan == criticMachine->makespan) {
+					makespan = criticMachine->makespan;
 					criticMachine = NULL;
 				}
 			}
+
+			if (criticMachine) {
+				makespan = criticMachine->makespan;
+			}
+
+			++it;
+			fprintf(csv, "%d,%d\n", it, makespan);
 
 		} while (criticMachine);
 
@@ -252,7 +259,8 @@ void simulatedAnnealing(int nMachines, int nTasks, float alfa, FILE* file) {
 				destroySolution(oldSolution, nMachines);
 			}
 			else {
-				const float acceptanceProbability = expf((float)(newMakespan - actualMakespan) / temperature);
+				const float delta = (float)(newMakespan - actualMakespan);
+				const float acceptanceProbability = expf(-delta / temperature);
 				const float randomValue = (float)rand() / RAND_MAX;
 				if (randomValue < acceptanceProbability) {
 					machines = newSolution;
@@ -337,7 +345,8 @@ void simulatedAnnealing_debug(int nMachines, int nTasks, float alfa, FILE* file)
 				destroySolution(oldSolution, nMachines);
 			}
 			else {
-				const float acceptanceProbability = expf((float)(newMakespan - actualMakespan) / temperature);
+				const float delta = (float)(newMakespan - actualMakespan);
+				const float acceptanceProbability = expf(-delta / temperature);
 				const float randomValue = (float)rand() / RAND_MAX;
 				if (randomValue < acceptanceProbability) {
 					machines = newSolution;
